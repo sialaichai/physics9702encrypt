@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prelim Chew Viewer (Encrypted)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js?v=1.0.1"></script>
+	<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        /* Styles remain identical to original index (1).html */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; overflow: hidden; }
+        #login-screen { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #e0e0e0; z-index: 10000; display: flex; justify-content: center; align-items: center; }
+        .login-box { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); text-align: center; width: 90%; max-width: 400px; }
+        .login-box h2 { margin-top: 0; color: #333; }
+        .login-box p { color: #666; margin-bottom: 20px; }
+        .login-box input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; box-sizing: border-box; outline: none; transition: border 0.3s; }
+        .login-box input:focus { border-color: #007bff; }
+        .login-box button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; transition: background 0.3s; }
+        .login-box button:hover { background: #0056b3; }
+        .error { color: #d9534f; margin-top: 15px; display: none; background: #f9d6d5; border: 1px solid #d9534f; padding: 10px; font-size: 13px; border-radius: 4px; text-align: left; }
+        .status { color: #0275d8; margin-top: 15px; font-size: 14px; font-weight: 500; display: block; }
+        #main-container { display: none; flex-direction: column; height: 100vh; }
+        #upper-panel { flex: 1; display: flex; flex-direction: column; min-height: 150px; }
+        #lower-panel { height: 300px; min-height: 100px; overflow-y: auto; background: white; }
+        #dragger { height: 5px; background: #ccc; cursor: ns-resize; border-top: 1px solid #aaa; border-bottom: 1px solid #aaa; }
+        #controls { padding: 10px; background: #f4f4f4; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-bottom: 1px solid #ddd; }
+        #pdf-viewer-container { flex: 1; background: #525659; }
+        #pdf-viewer { width: 100%; height: 100%; border: none; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f8f9fa; cursor: pointer; position: sticky; top: 0; user-select: none; }
+        tbody tr:hover { background-color: #e2e6ea; cursor: pointer; }
+        .dropdown-check-container { position: relative; display: inline-block; }
+        .filter-button { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; background: white; min-width: 60px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+        .dropdown-panel { display: none; position: absolute; background: white; border: 1px solid #ccc; box-shadow: 0 4px 8px rgba(0,0,0,0.1); z-index: 100; min-width: 200px; padding: 10px; border-radius: 4px; }
+        .dropdown-list { max-height: 250px; overflow-y: auto; border-bottom: 1px solid #eee; margin-bottom: 10px; }
+        .dropdown-list label { display: block; padding: 6px; cursor: pointer; }
+        .apply-button { width: 100%; padding: 8px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        #generate-html-btn { background-color: #28a745; color: white; padding: 8px 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 14px; }
+        #file-count-display { font-weight: bold; color: #555; margin-left: 10px; }
+    </style>
+</head>
+<body>
+
+    <div id="login-screen">
+        <div class="login-box">
+            <h2>Restricted Access</h2>
+            <p>Enter password to unlock prelim papers</p>
+			<p>Clear Browser Cache for latest updates</p>
+            <input type="password" id="pass-input" placeholder="Password" onkeypress="handleEnter(event)">
+            <button onclick="unlock()">Login</button>
+            <div id="status-msg" class="status">Initializing...</div>
+            <div id="error-msg" class="error"></div>
+        </div>
+    </div>
+
+    <div id="main-container">
+        <div id="upper-panel">
+            <div id="controls">
+                <div class="dropdown-check-container">
+                    <button id="year-filter-btn" class="filter-button">Year (<span id="year-filter-count">0</span>)</button>
+                    <div id="year-filter-panel" class="dropdown-panel">
+                        <div id="year-filter-list" class="dropdown-list"></div>
+                        <button id="year-filter-apply" class="apply-button">Apply</button>
+                    </div>
+                </div>
+				
+                <div class="dropdown-check-container">
+                    <button id="jc-filter-btn" class="filter-button">JC (<span id="jc-filter-count">0</span>)</button>
+                    <div id="jc-filter-panel" class="dropdown-panel">
+                        <div id="jc-filter-list" class="dropdown-list"></div>
+                        <button id="jc-filter-apply" class="apply-button">Apply</button>
+                    </div>
+                </div>
+
+                <div class="dropdown-check-container">
+                    <button id="paper-filter-btn" class="filter-button">Paper (<span id="paper-filter-count">0</span>)</button>
+                    <div id="paper-filter-panel" class="dropdown-panel">
+                        <div id="paper-filter-list" class="dropdown-list"></div>
+                        <button id="paper-filter-apply" class="apply-button">Apply</button>
+                    </div>
+                </div>
+
+                <div class="dropdown-check-container">
+                    <button id="question-filter-btn" class="filter-button">Question (<span id="question-filter-count">0</span>)</button>
+                    <div id="question-filter-panel" class="dropdown-panel">
+                        <div id="question-filter-list" class="dropdown-list"></div>
+                        <button id="question-filter-apply" class="apply-button">Apply</button>
+                    </div>
+                </div>
+
+				<div class="dropdown-check-container">
+				  <button id="topic-filter-btn" class="filter-button">Topic (<span id="topic-filter-count">0</span>)</button>
+				  <div id="topic-filter-panel" class="dropdown-panel">
+				    <div id="topic-filter-list" class="dropdown-list"></div>
+				    <button id="topic-filter-apply" class="apply-button">Apply</button>
+				  </div>
+				</div>
+				<label style="display:inline-flex;align-items:center;margin-left:10px;font-size:14px;">
+				  <input type="checkbox" id="include-other-topics" />
+				  <span style="margin-left:4px;">“Other Topics”</span>
+				</label>
+                
+                <button id="generate-html-btn">HTML</button>
+                <button id="merge-pdf-btn" style="background-color: #007bff; color: white; padding: 8px 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 14px;">PDFs</button>
+                <button id="download-zip-btn" style="background-color: #ff9800; color: white; padding: 8px 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 14px;">ZIP</button>
+				<span id="file-count-display"></span>
+            </div>
+            <div id="pdf-viewer-container"><iframe id="pdf-viewer" src="" frameborder="0"></iframe></div>
+        </div>
+
+        <div id="dragger"></div>
+
+        <div id="lower-panel">
+            <table id="data-table">
+                <thead>
+                    <tr>
+                        <th>Filename</th>
+                        <th>Year</th>
+                        <th>JC</th>
+                        <th>Paper</th>
+                        <th>Question</th>
+                        <th>Main Topic</th>
+                        <th>Other Topics</th>
+                    </tr>
+                </thead>
+                <tbody id="data-table-body"></tbody>
+            </table>
+        </div>
+    </div> 
+
+    <script>
+    const PAYLOAD_FILE = 'payload.enc';
+    const UPDATES_FILE = 'updates.json'; 
+    let PDF_FOLDER = ''; 
+    let ENCRYPTED_TEXT = '';
+
+    const statusEl = document.getElementById('status-msg');
+    const errorEl = document.getElementById('error-msg');
+
+    function logError(msg) {
+        errorEl.style.display = 'block';
+        errorEl.textContent = msg;
+        statusEl.style.display = 'none';
+        console.error(msg);
+    }
+
+    function logStatus(msg) {
+        statusEl.textContent = msg;
+        statusEl.style.display = 'block';
+        errorEl.style.display = 'none';
+    }
+
+    fetch(PAYLOAD_FILE)
+        .then(res => {
+            if(!res.ok) throw new Error(`Fetch Failed: ${res.status} ${res.statusText}`);
+            return res.text();
+        })
+        .then(text => { 
+            if (!text || text.length === 0) throw new Error("payload.enc is EMPTY.");
+            ENCRYPTED_TEXT = text.trim();
+            logStatus(`Ready.`);
+            const savedPass = sessionStorage.getItem('prelim_session_key');
+            if(savedPass) {
+                document.getElementById('pass-input').value = savedPass;
+                unlock(true); 
+            }
+        })
+        .catch(err => logError("Error: Could not find 'payload.enc'."));
+
+    function handleEnter(e) { if(e.key === 'Enter') unlock(); }
+
+    function unlock(isAuto = false) {
+        const passInput = document.getElementById('pass-input');
+        const pass = passInput.value;
+        if (!pass || !ENCRYPTED_TEXT) return;
+
+        setTimeout(() => {
+            try {
+                const bytes = CryptoJS.AES.decrypt(ENCRYPTED_TEXT, pass);
+                let decryptedStr = bytes.toString(CryptoJS.enc.Utf8);
+                if (!decryptedStr) throw new Error("Incorrect Password.");
+
+                let bundle = JSON.parse(decryptedStr);
+                sessionStorage.setItem('prelim_session_key', pass);
+                PDF_FOLDER = bundle.secure_folder;
+                let mainData = bundle.data;
+
+                fetch(UPDATES_FILE)
+                    .then(res => res.status === 404 ? [] : res.json())
+                    .then(updateData => {
+                        if(Array.isArray(updateData)) mainData = mainData.concat(updateData);
+                        startApp(mainData);
+                        document.getElementById('login-screen').style.display = 'none';
+                        document.getElementById('main-container').style.display = 'flex';
+                    })
+                    .catch(() => {
+                        startApp(mainData);
+                        document.getElementById('login-screen').style.display = 'none';
+                        document.getElementById('main-container').style.display = 'flex';
+                    });
+            } catch (e) {
+                if(isAuto) sessionStorage.removeItem('prelim_session_key');
+                else logError(e.message);
+            }
+        }, 100);
+    }
+
+    /**
+     * Helper: Fetch encrypted file and decrypt to Uint8Array
+     */
+    async function fetchAndDecrypt(url) {
+    const pass = sessionStorage.getItem('prelim_session_key');
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("File not found on server.");
+    
+    const encryptedData = await response.text();
+
+    try {
+        const decrypted = CryptoJS.AES.decrypt(encryptedData.trim(), pass);
+        
+        // SAFETY GATE: If sigBytes is negative or 0, decryption failed
+        if (decrypted.sigBytes <= 0) {
+            console.error("Decryption failed. sigBytes:", decrypted.sigBytes);
+            throw new Error("Invalid Password or Corrupted File.");
+        }
+        
+        // Convert CryptoJS WordArray to Uint8Array safely
+        const typedArray = new Uint8Array(decrypted.sigBytes);
+        const words = decrypted.words;
+        for (let i = 0; i < decrypted.sigBytes; i++) {
+            typedArray[i] = (words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
+        }
+        
+        return typedArray;
+    } catch (e) {
+        alert("Error: The password in your session does not match this file's encryption.");
+        throw e;
+    }
+}
+
+    function startApp(allData) {
+        let selectedTopics = new Set();
+        let selectedYears = new Set();
+        let selectedJCs = new Set();
+        let selectedPapers = new Set();
+        let selectedQuestions = new Set();
+        
+        const tableBody = document.getElementById('data-table-body');
+        const pdfViewer = document.getElementById('pdf-viewer');
+        const fileCountDisplay = document.getElementById('file-count-display');
+        
+        allData = allData.map(item => {
+            let q = (item.question || '').trim();
+            q = q.replace(/\.pdf$/i, '').replace(/^q0+(\d)/i, 'q$1');
+            return {
+                filename: (item.filename || '').trim(),
+                year: (item.year || '').trim(),
+                jc: (item.jc || '').trim(),
+                paper: (item.paper || '').trim(),
+                question: q, 
+                mainTopic: (item.mainTopic || '').trim(),
+                otherTopics: Array.isArray(item.otherTopics) ? item.otherTopics.map(t => t.trim()).filter(t => t !== "") : []
+            };
+        });
+
+        let currentFilteredData = [...allData]; 
+        let currentSort = { column: 1, asc: false };
+        const baseHeaders = ['Filename', 'Year', 'JC', 'Paper', 'Question', 'Main Topic', 'Other Topics'];
+
+        populateDropdowns(allData);
+        setupEventListeners(allData);
+        renderTable(currentFilteredData);
+
+        function populateDropdowns(data) {
+            const getUniques = (mapper, sorter) => [...new Set(data.map(mapper).flat().filter(Boolean))].sort(sorter);
+            const naturalSort = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+            const yearSort = (a, b) => (parseInt(b.replace(/\D/g, '')) || 0) - (parseInt(a.replace(/\D/g, '')) || 0);
+
+            setupList('topic-filter-list', getUniques(i => i.mainTopic.split(/[;,]/).map(s=>s.trim()), undefined), 'topic-checkbox');
+            setupList('year-filter-list', getUniques(i => i.year, yearSort), 'year-checkbox');
+            setupList('jc-filter-list', getUniques(i => i.jc, undefined), 'jc-checkbox');
+            setupList('paper-filter-list', getUniques(i => i.paper, undefined), 'paper-checkbox');
+            setupList('question-filter-list', getUniques(i => i.question, naturalSort), 'question-checkbox');
+        }
+
+        function setupList(id, arr, cls) {
+            const el = document.getElementById(id);
+            if(!el) return; el.innerHTML = '';
+            arr.forEach(v => {
+                const l = document.createElement('label');
+                l.innerHTML = `<input type="checkbox" class="${cls}" value="${v}"> ${v}`;
+                el.appendChild(l);
+            });
+        }
+
+function setupEventListeners(data) {
+    const setup = (btnId, panelId, listId, applyId, set, cls) => {
+        const btn = document.getElementById(btnId), panel = document.getElementById(panelId);
+        const list = document.getElementById(listId), apply = document.getElementById(applyId);
+        btn.addEventListener('click', () => panel.style.display = panel.style.display === 'block' ? 'none' : 'block');
+        apply.addEventListener('click', () => {
+            set.clear(); list.querySelectorAll(`.${cls}:checked`).forEach(b => set.add(b.value));
+            btn.children[0].textContent = set.size; panel.style.display = 'none'; applyFilters(data);
+        });
+    };
+    setup('topic-filter-btn', 'topic-filter-panel', 'topic-filter-list', 'topic-filter-apply', selectedTopics, 'topic-checkbox');
+    setup('year-filter-btn', 'year-filter-panel', 'year-filter-list', 'year-filter-apply', selectedYears, 'year-checkbox');
+    setup('jc-filter-btn', 'jc-filter-panel', 'jc-filter-list', 'jc-filter-apply', selectedJCs, 'jc-checkbox');
+    setup('paper-filter-btn', 'paper-filter-panel', 'paper-filter-list', 'paper-filter-apply', selectedPapers, 'paper-checkbox');
+    setup('question-filter-btn', 'question-filter-panel', 'question-filter-list', 'question-filter-apply', selectedQuestions, 'question-checkbox');
+
+    // Helper to safely convert bytes to Base64 without crashing on large files
+    const bytesToBase64 = (bytes) => {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(',')[1]);
+            reader.readAsDataURL(new Blob([bytes]));
+        });
+    };
+
+    // HTML Report Button
+    document.getElementById('generate-html-btn').addEventListener('click', async () => {
+        const rows = Array.from(tableBody.querySelectorAll('tr'));
+        if (rows.length === 0) return alert("No files in the table to export.");
+        if (rows.length > 30 && !confirm(`Processing ${rows.length} files. This may take a moment. Continue?`)) return;
+
+        try {
+            let html = `<html><head><title>Decrypted Report</title><style>body{font-family:sans-serif;background:#f4f4f4;padding:20px;}.pdf-section{margin-bottom:40px;background:#fff;padding:15px;border-radius:8px;box-shadow:0 2px 5px rgba(0,0,0,0.1);}embed{width:100%;height:800px;border:1px solid #ccc;}</style></head><body><h1>Generated Report</h1>`;
+            
+            for (let r of rows) {
+                const fname = r.cells[0].textContent;
+                const year = r.cells[1].textContent;
+                const fileUrl = `${PDF_FOLDER}/${year}/${fname}`;
+                
+                const bytes = await fetchAndDecrypt(fileUrl);
+                const base64 = await bytesToBase64(bytes);
+                
+                html += `<div class='pdf-section'><h3>File: ${fname}</h3><embed src='data:application/pdf;base64,${base64}' type='application/pdf' /></div>`;
+            }
+            
+            html += `</body></html>`;
+            const blob = new Blob([html], { type: 'text/html' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'decrypted_report.html';
+            a.click();
+        } catch (err) {
+            alert("Error generating HTML: " + err.message);
+        }
+    });
+
+    // Merge PDF Button
+    document.getElementById('merge-pdf-btn').addEventListener('click', async () => {
+        const rows = Array.from(tableBody.querySelectorAll('tr'));
+        if (rows.length === 0) return alert("No files to merge.");
+        
+        try {
+            const { PDFDocument, rgb, StandardFonts } = PDFLib;
+            const mergedPdf = await PDFDocument.create();
+            const font = await mergedPdf.embedFont(StandardFonts.HelveticaBold);
+
+            for (let r of rows) {
+                const fname = r.cells[0].textContent;
+                const year = r.cells[1].textContent;
+                const bytes = await fetchAndDecrypt(`${PDF_FOLDER}/${year}/${fname}`);
+                const sourcePdf = await PDFDocument.load(bytes);
+                
+                const bannerPage = mergedPdf.addPage([sourcePdf.getPages()[0].getSize().width, 30]);
+                bannerPage.drawText(`File: ${fname}`, { x: 15, y: 10, size: 10, font: font, color: rgb(0.1, 0.1, 0.1) });
+                
+                const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+                copiedPages.forEach(page => mergedPdf.addPage(page));
+            }
+            
+            const pdfBytes = await mergedPdf.save();
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
+            a.download = `merged_decrypted.pdf`;
+            a.click();
+        } catch (err) {
+            alert("Error merging PDFs: " + err.message);
+        }
+    });
+
+    // ZIP Download Button
+    document.getElementById('download-zip-btn').addEventListener('click', async () => {
+        const rows = Array.from(tableBody.querySelectorAll('tr'));
+        if (rows.length === 0) return alert("No files to ZIP.");
+        
+        try {
+            const zip = new JSZip();
+            for (let r of rows) {
+                const fname = r.cells[0].textContent;
+                const year = r.cells[1].textContent;
+                const bytes = await fetchAndDecrypt(`${PDF_FOLDER}/${year}/${fname}`);
+                zip.file(fname, bytes);
+            }
+            const content = await zip.generateAsync({ type: "blob" });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(content);
+            a.download = `decrypted_papers.zip`;
+            a.click();
+        } catch (err) {
+            alert("Error creating ZIP: " + err.message);
+        }
+    });
+}
+        function applyFilters(data) {
+          let fd = [...data];
+          if (selectedTopics.size > 0) {
+            const includeOther = document.getElementById('include-other-topics').checked;
+            fd = fd.filter(item => selectedTopics.has(item.mainTopic) || (includeOther && item.otherTopics.some(t => selectedTopics.has(t))));
+          }
+          if (selectedYears.size > 0) fd = fd.filter(i => selectedYears.has(i.year));
+          if (selectedJCs.size > 0) fd = fd.filter(i => selectedJCs.has(i.jc));
+          if (selectedPapers.size > 0) fd = fd.filter(i => selectedPapers.has(i.paper));
+          if (selectedQuestions.size > 0) fd = fd.filter(i => selectedQuestions.has(i.question));
+          currentFilteredData = fd;
+          renderTable(currentFilteredData);
+        }
+
+        function renderTable(data) {
+            const headers = document.querySelectorAll('#data-table th');
+            headers.forEach((th, index) => th.textContent = baseHeaders[index] + (currentSort.column === index ? (currentSort.asc ? ' ▲' : ' ▼') : ''));
+
+            data.sort((a, b) => {
+                const keys = ['filename', 'year', 'jc', 'paper', 'question', 'mainTopic', 'otherTopics'];
+                let valA = a[keys[currentSort.column]], valB = b[keys[currentSort.column]];
+                if (keys[currentSort.column] === 'year') return currentSort.asc ? valA - valB : valB - valA;
+                return currentSort.asc ? String(valA).localeCompare(String(valB), undefined, { numeric: true }) : String(valB).localeCompare(String(valA), undefined, { numeric: true });
+            });
+
+            tableBody.innerHTML = '';
+            data.slice(0, 500).forEach(r => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${r.filename}</td><td>${r.year}</td><td>${r.jc}</td><td>${r.paper}</td><td>${r.question}</td><td>${r.mainTopic}</td><td>${r.otherTopics.join(', ')}</td>`;
+                
+                // Decryption Logic for Viewing PDF
+                tr.addEventListener('click', async () => {
+                    const decryptedBytes = await fetchAndDecrypt(`${PDF_FOLDER}/${r.year}/${r.filename}`);
+                    const blobUrl = URL.createObjectURL(new Blob([decryptedBytes], { type: 'application/pdf' }));
+                    if (pdfViewer.src.startsWith('blob:')) URL.revokeObjectURL(pdfViewer.src);
+                    pdfViewer.src = blobUrl;
+                });
+                tableBody.appendChild(tr);
+            });
+            fileCountDisplay.textContent = `${data.length} files found`;
+        }
+
+        const dragger = document.getElementById('dragger');
+        const lowerPanel = document.getElementById('lower-panel');
+        let isD = false;
+        dragger.addEventListener('mousedown', () => { isD = true; pdfViewer.style.pointerEvents = 'none'; });
+        document.addEventListener('mouseup', () => { isD = false; pdfViewer.style.pointerEvents = 'auto'; });
+        document.addEventListener('mousemove', (e) => { if(isD) lowerPanel.style.height = `${window.innerHeight - e.clientY}px`; });
+    }
+    </script>
+</body>
+</html>
