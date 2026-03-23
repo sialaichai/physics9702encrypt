@@ -131,7 +131,7 @@
     </div> 
 
     <script>
-    const PAYLOAD_FILE = 'payload.enc';
+    const PAYLOAD_FILE = '9702payload.enc';
     const UPDATES_FILE = 'updates.json'; 
     let PDF_FOLDER = ''; 
     let ENCRYPTED_TEXT = '';
@@ -158,7 +158,7 @@
             return res.text();
         })
         .then(text => { 
-            if (!text || text.length === 0) throw new Error("payload.enc is EMPTY.");
+            if (!text || text.length === 0) throw new Error("9702payload.enc is EMPTY.");
             ENCRYPTED_TEXT = text.trim();
             logStatus(`Ready.`);
             const savedPass = sessionStorage.getItem('prelim_session_key');
@@ -167,7 +167,7 @@
                 unlock(true); 
             }
         })
-        .catch(err => logError("Error: Could not find 'payload.enc'."));
+        .catch(err => logError("Error: Could not find '9702payload.enc'."));
 
     function handleEnter(e) { if(e.key === 'Enter') unlock(); }
 
