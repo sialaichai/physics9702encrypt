@@ -2,68 +2,91 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Data Encryptor Tool</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    
     <style>
-        body { font-family: sans-serif; padding: 40px; max-width: 600px; margin: 0 auto; background: #f4f4f4; }
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        label { display: block; margin-top: 15px; font-weight: bold; }
-        input[type="text"], input[type="password"] { width: 100%; padding: 10px; margin-top: 5px; box-sizing: border-box; }
-        button { margin-top: 20px; width: 100%; padding: 15px; background: #28a745; color: white; border: none; font-size: 16px; font-weight: bold; cursor: pointer; }
-        button:hover { background: #218838; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; max-width: 700px; margin: 0 auto; background: #f0f2f5; line-height: 1.6; }
+        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        h2 { margin-top: 0; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        label { display: block; margin-top: 15px; font-weight: bold; color: #555; }
+        input[type="text"], input[type="password"], input[type="file"] { width: 100%; padding: 10px; margin-top: 5px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; }
+        button { margin-top: 20px; width: 100%; padding: 12px; color: white; border: none; font-size: 16px; font-weight: bold; cursor: pointer; border-radius: 4px; transition: opacity 0.2s; }
+        button:hover { opacity: 0.9; }
+        .btn-green { background: #28a745; }
+        .btn-blue { background: #007bff; }
+        .status { margin-top: 15px; padding: 10px; border-radius: 4px; font-size: 0.9em; }
+        .status-idle { color: #666; }
+        .status-success { background: #d4edda; color: #155724; }
     </style>
 </head>
 <body>
+
     <div class="card">
-        <h2>Step 1: Create Your Locked Data</h2>
-        
-        <label>1. Secret PDF Folder Name:</label>
+        <h2>Global Settings</h2>
+        <label>Set Access Password (Used for all steps):</label>
+        <input type="password" id="password" placeholder="Enter a strong password">
+    </div>
+
+    <div class="card">
+        <h2>Step 1: Create Locked Data Bundle</h2>
+        <label>Secret PDF Folder Name:</label>
         <input type="text" id="folderName" value="pdfs">
         
-        <label>2. Select your physics_data.json:</label>
+        <label>Select physics_data.json:</label>
         <input type="file" id="fileInput">
 
-        <label>3. Set an Access Password:</label>
-        <input type="password" id="password" placeholder="Enter a strong password">
+        <button class="btn-green" onclick="processAndEncrypt()">Generate payload.enc</button>
+        <div id="status1" class="status"></div>
+    </div>
 
-        <button onclick="processAndEncrypt()">Generate payload.enc</button>
-        <p id="status" style="margin-top:15px; color:blue;"></p>
+    <div class="card">
+        <h2>Step 2: Encrypt PDFs (Individual)</h2>
+        <p><small>Encrypts files and downloads them one by one.</small></p>
+        <input type="file" id="pdfFiles" multiple>
+        <button class="btn-blue" onclick="encryptPDFFiles()">Encrypt & Download Files</button>
+    </div>
+
+    <div class="card">
+        <h2>Step 3: Encrypt PDFs (ZIP Bundle)</h2>
+        <p><small>Encrypts files and bundles them into a single .zip archive.</small></p>
+        <input type="file" id="pdfFilesZip" multiple>
+        <button class="btn-blue" onclick="zipencryptPDFFiles()">Encrypt & Download ZIP</button>
+        <div id="status3" class="status"></div>
     </div>
 
     <script>
+        // --- STEP 1: JSON Logic ---
         function processAndEncrypt() {
             const folder = document.getElementById('folderName').value.trim();
             const pass = document.getElementById('password').value;
             const fileInput = document.getElementById('fileInput');
+            const status = document.getElementById('status1');
 
             if (!folder || !pass || !fileInput.files[0]) {
-                alert("Please fill in all fields.");
+                alert("Please fill in all fields in Step 1 and the Password.");
                 return;
             }
 
             const reader = new FileReader();
             reader.onload = function(e) {
                 try {
-                    // 1. Read and Clean JSON
                     let rawText = e.target.result;
-                    // Remove hidden BOM characters if present
                     if (rawText.charCodeAt(0) === 0xFEFF) rawText = rawText.slice(1);
-                    
                     const jsonData = JSON.parse(rawText);
 
-                    // 2. Bundle Folder + Data
                     const bundle = {
                         secure_folder: folder,
                         data: jsonData
                     };
 
-                    // 3. Encrypt
                     const encrypted = CryptoJS.AES.encrypt(JSON.stringify(bundle), pass).toString();
                     
-                    // 4. Download
-                    download("payload.enc", encrypted);
-                    document.getElementById('status').innerText = "Success! 'payload.enc' downloaded. Upload it to GitHub.";
-
+                    downloadBlob(new Blob([encrypted], {type: "text/plain"}), "payload.enc");
+                    status.className = "status status-success";
+                    status.innerText = "Success! 'payload.enc' downloaded.";
                 } catch (err) {
                     alert("Error parsing JSON file: " + err.message);
                 }
@@ -71,101 +94,67 @@
             reader.readAsText(fileInput.files[0]);
         }
 
-        function download(filename, text) {
+        // --- STEP 2: Individual PDF Logic ---
+        async function encryptPDFFiles() {
+            const pass = document.getElementById('password').value;
+            const files = document.getElementById('pdfFiles').files;
+            if (!pass || files.length === 0) return alert("Enter password and select files for Step 2.");
+
+            for (let file of files) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const wa = CryptoJS.lib.WordArray.create(e.target.result);
+                    const encrypted = CryptoJS.AES.encrypt(wa, pass).toString();
+                    downloadBlob(new Blob([encrypted], {type: "text/plain"}), file.name);
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        }
+
+        // --- STEP 3: ZIP Logic ---
+        async function zipencryptPDFFiles() {
+            const pass = document.getElementById('password').value;
+            const files = document.getElementById('pdfFilesZip').files; // Fixed ID
+            const status = document.getElementById('status3');
+            
+            if (!pass) return alert("Please enter a password first.");
+            if (files.length === 0) return alert("Please select some PDF files for Step 3.");
+
+            const zip = new JSZip();
+            status.innerText = "Processing files... please wait.";
+
+            const filePromises = Array.from(files).map(file => {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const wa = CryptoJS.lib.WordArray.create(e.target.result);
+                        const encrypted = CryptoJS.AES.encrypt(wa, pass).toString();
+                        zip.file(file.name, encrypted);
+                        resolve();
+                    };
+                    reader.readAsArrayBuffer(file);
+                });
+            });
+
+            await Promise.all(filePromises);
+            const content = await zip.generateAsync({ type: "blob" });
+            downloadBlob(content, "encrypted_pdfs.zip");
+
+            status.className = "status status-success";
+            status.innerText = "Done! ZIP archive downloaded.";
+        }
+
+        // Helper function for cleaner downloads
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
             const element = document.createElement('a');
-            element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
-            element.setAttribute('download', filename);
-            element.style.display = 'none';
+            element.href = url;
+            element.download = filename;
             document.body.appendChild(element);
             element.click();
             document.body.removeChild(element);
+            URL.revokeObjectURL(url);
         }
     </script>
-
-
-<hr>
-<h2>Step 2: Encrypt PDF Files</h2>
-<p>Select your PDF files to turn them into encrypted versions.</p>
-<input type="file" id="pdfFiles" multiple>
-<button onclick="encryptPDFFiles()" style="background:#007bff;">Encrypt & Download PDFs</button>
-
-<script>
-async function encryptPDFFiles() {
-    const pass = document.getElementById('password').value;
-    const files = document.getElementById('pdfFiles').files;
-    if (!pass || files.length === 0) return alert("Enter password and select files.");
-
-    for (let file of files) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            // Convert ArrayBuffer to WordArray for CryptoJS
-            const wa = CryptoJS.lib.WordArray.create(e.target.result);
-            const encrypted = CryptoJS.AES.encrypt(wa, pass).toString();
-            
-            // Download the encrypted version (same filename)
-            const element = document.createElement('a');
-            element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(encrypted));
-            element.setAttribute('download', file.name);
-            element.click();
-        };
-        reader.readAsArrayBuffer(file);
-    }
-}
-</script>
-
-
-<hr>
-<h2>Step 3: zip Encrypt PDF Files</h2>
-<p>Select your PDF files to turn them into encrypted versions.</p>
-<input type="file" id="pdfFiles" multiple>
-<button onclick="zipencryptPDFFiles()" style="background:#007bff;">Encrypt & Download ZIP</button>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script>
-async function zipencryptPDFFiles() {
-    const pass = document.getElementById('password').value;
-    const files = document.getElementById('pdfFiles').files;
-    
-    if (!pass) return alert("Please enter a password first.");
-    if (files.length === 0) return alert("Please select some PDF files.");
-
-    const zip = new JSZip();
-    const status = document.getElementById('status');
-    status.innerText = "Processing files... please wait.";
-
-    // We use a Promise-based approach to ensure all files are read before zipping
-    const filePromises = Array.from(files).map(file => {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                // 1. Convert to WordArray for CryptoJS
-                const wa = CryptoJS.lib.WordArray.create(e.target.result);
-                // 2. Encrypt
-                const encrypted = CryptoJS.AES.encrypt(wa, pass).toString();
-                // 3. Add to ZIP (keeping the original filename)
-                zip.file(file.name, encrypted);
-                resolve();
-            };
-            reader.readAsArrayBuffer(file);
-        });
-    });
-
-    // Wait for all files to be encrypted
-    await Promise.all(filePromises);
-
-    // Generate the ZIP file
-    const content = await zip.generateAsync({ type: "blob" });
-    
-    // Download the final ZIP
-    const element = document.createElement('a');
-    element.href = URL.createObjectURL(content);
-    element.download = "encrypted_pdfs.zip";
-    element.click();
-
-    status.innerText = "Done! All files encrypted and zipped.";
-}
-</script>
-
-
 </body>
 </html>
